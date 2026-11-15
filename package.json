@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "remotion studio",
     "render": "remotion render HelloThree out/hello-three.mp4 --gl=angle",
+    "render:traderswalle": "remotion render TraderswallePromo out/traderswalle-promo.mp4 --gl=angle",
     "render:still": "remotion still HelloThree out/thumbnail.png --frame=60 --gl=angle",
     "typecheck": "tsc --noEmit",
     "upgrade": "remotion upgrade"

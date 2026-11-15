@@ -47,3 +47,12 @@ src/scenes/Title.tsx      2D HTML/CSS overlay on top of the 3D scene
 ## Audio
 
 Use `<Audio src={staticFile("track.mp3")} />` anywhere in the composition. Use `<Sequence from={frame}>` to start a sound at a specific moment, and pass `volume` as a function of the frame for fades. `@remotion/media-utils` is installed for audio visualisation (`useAudioData`, `visualizeAudio`), so you can make 3D objects react to the music.
+
+## Videos
+
+| Composition | Length | Render |
+|---|---|---|
+| `HelloThree` | 8s | `npm run render` |
+| `TraderswallePromo` | 30s | `npm run render:traderswalle` |
+
+`TraderswallePromo` follows `scripts/traderswalle-promo.md`. Its brand name, tagline and end-card text are props (`brand`, `tagline`, `contact`), so you can edit them in Remotion Studio's props panel. Scene timings live in `src/traderswalle/theme.ts`. The music and whoosh in `public/traderswalle/` are generated placeholders.
