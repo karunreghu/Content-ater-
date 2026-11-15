@@ -1,0 +1,29 @@
+{
+  "name": "content-ater",
+  "version": "1.0.0",
+  "private": true,
+  "description": "3D animation videos with three.js + Remotion",
+  "scripts": {
+    "dev": "remotion studio",
+    "render": "remotion render HelloThree out/hello-three.mp4 --gl=angle",
+    "render:still": "remotion still HelloThree out/thumbnail.png --frame=60 --gl=angle",
+    "typecheck": "tsc --noEmit",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
+    "@remotion/cli": "4.0.543",
+    "@remotion/media-utils": "4.0.543",
+    "@remotion/three": "4.0.543",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "remotion": "4.0.543",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/three": "^0.187.0",
+    "typescript": "^5.9.3"
+  }
+}
