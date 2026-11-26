@@ -180,8 +180,8 @@ plot(ema100, color=color.rgb(101, 67, 33, 40), title="100 EMA", display=display.
 plot(ema200, color=color.rgb(101, 67, 33, 40), title="200 EMA", display=display.all - display.price_scale)
 
 // ─── Helper plots for edge fills ──────────────────────────────────
-topEdge    = plot(upper + 20, "Top Edge",    color=na)
-bottomEdge = plot(lower - 20, "Bottom Edge", color=na)
+topEdge    = plot(upper + 20, "Top Edge",    color=na, display=display.all - display.price_scale)
+bottomEdge = plot(lower - 20, "Bottom Edge", color=na, display=display.all - display.price_scale)
 
 // ─── Squeeze / Expansion fill color ────────────────────────────────
 sqColor = bb_squeeze_end   ? color.new(color.teal,   75) : na
@@ -370,7 +370,7 @@ table.cell(dotTable, 0, 0,
      bgcolor    = color.new(color.black, 100))
 
 // ─── H / H+ marker position: buy (green) a little below the lower BB, sell (red) a little above the upper BB ───
-hMarkGap  = input.float(0.8, "H / H+ marker gap from Bollinger Band (× ATR)", minval=0, step=0.1, group="Hull Suite")
+hMarkGap  = input.float(0.99, "H / H+ marker gap from Bollinger Band (× ATR)", minval=0, step=0.1, group="Hull Suite")
 hMarkYBuy = lower - atr * hMarkGap
 hMarkY    = upper + atr * hMarkGap
 
@@ -380,16 +380,16 @@ hullBottom = math.min(MHULL, SHULL)
 green_cross_hull     = is_green and open <= hullTop and close > hullTop
 green_cross_hull_vol = green_cross_hull and vol_ok
 // Diamond (no text) + a transparent "label up" at the same price: its text box hangs BELOW the point, so "H" / "H+" sits under the diamond
-plotshape(green_cross_hull ? hMarkYBuy : na,                              title="Hull Cross Up",          style=shape.diamond, location=location.absolute, color=color.black, size=size.tiny)
-plotshape(green_cross_hull_vol ? hMarkYBuy : na,                          title="Hull Cross Up+V (text)", style=shape.labelup, location=location.absolute, color=color.new(color.black, 100), size=size.tiny, text="H+", textcolor=color.black)
-plotshape(green_cross_hull and not green_cross_hull_vol ? hMarkYBuy : na, title="Hull Cross Up (text)",   style=shape.labelup, location=location.absolute, color=color.new(color.black, 100), size=size.tiny, text="H",  textcolor=color.black)
+plotshape(green_cross_hull ? hMarkYBuy : na,                              title="Hull Cross Up",          style=shape.diamond, location=location.absolute, color=color.green, size=size.tiny, display=display.all - display.price_scale)
+plotshape(green_cross_hull_vol ? hMarkYBuy : na,                          title="Hull Cross Up+V (text)", style=shape.labelup, location=location.absolute, color=color.new(color.green, 100), size=size.tiny, text="H+", textcolor=color.green, display=display.all - display.price_scale)
+plotshape(green_cross_hull and not green_cross_hull_vol ? hMarkYBuy : na, title="Hull Cross Up (text)",   style=shape.labelup, location=location.absolute, color=color.new(color.green, 100), size=size.tiny, text="H",  textcolor=color.green, display=display.all - display.price_scale)
 alertcondition(green_cross_hull, title="Green Candle Crossed Hull Ribbon", message="Green candle crossed above Hull ribbon at {{close}}. SL at {{low}}")
 
 // ─── Red Candle Crosses Hull Ribbon ───────────────────────────────
 red_cross_hull     = is_red and open >= hullBottom and close < hullBottom
 red_cross_hull_vol = red_cross_hull and vol_ok
-plotshape(red_cross_hull_vol ? hMarkY : na,                        title="Hull Cross Down+V", style=shape.diamond, location=location.absolute, color=color.red, size=size.tiny, text="H+", textcolor=color.red)
-plotshape(red_cross_hull and not red_cross_hull_vol ? hMarkY : na, title="Hull Cross Down",   style=shape.diamond, location=location.absolute, color=color.red, size=size.tiny, text="H",  textcolor=color.red)
+plotshape(red_cross_hull_vol ? hMarkY : na,                        title="Hull Cross Down+V", style=shape.diamond, location=location.absolute, color=color.red, size=size.tiny, text="H+", textcolor=color.red, display=display.all - display.price_scale)
+plotshape(red_cross_hull and not red_cross_hull_vol ? hMarkY : na, title="Hull Cross Down",   style=shape.diamond, location=location.absolute, color=color.red, size=size.tiny, text="H",  textcolor=color.red, display=display.all - display.price_scale)
 alertcondition(red_cross_hull, title="Red Candle Crossed Hull Ribbon", message="Red candle crossed below Hull ribbon at {{close}}. SL at {{high}}")
 
 
