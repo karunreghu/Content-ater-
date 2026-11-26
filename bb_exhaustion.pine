@@ -379,8 +379,10 @@ hullTop    = math.max(MHULL, SHULL)
 hullBottom = math.min(MHULL, SHULL)
 green_cross_hull     = is_green and open <= hullTop and close > hullTop
 green_cross_hull_vol = green_cross_hull and vol_ok
-plotshape(green_cross_hull_vol ? hMarkYBuy : na,                          title="Hull Cross Up+V", style=shape.diamond, location=location.absolute, color=color.black, size=size.tiny, text="H+", textcolor=color.black)
-plotshape(green_cross_hull and not green_cross_hull_vol ? hMarkYBuy : na, title="Hull Cross Up",   style=shape.diamond, location=location.absolute, color=color.black, size=size.tiny, text="H",  textcolor=color.black)
+// Diamond (no text) + a transparent "label up" at the same price: its text box hangs BELOW the point, so "H" / "H+" sits under the diamond
+plotshape(green_cross_hull ? hMarkYBuy : na,                              title="Hull Cross Up",          style=shape.diamond, location=location.absolute, color=color.black, size=size.tiny)
+plotshape(green_cross_hull_vol ? hMarkYBuy : na,                          title="Hull Cross Up+V (text)", style=shape.labelup, location=location.absolute, color=color.new(color.black, 100), size=size.tiny, text="H+", textcolor=color.black)
+plotshape(green_cross_hull and not green_cross_hull_vol ? hMarkYBuy : na, title="Hull Cross Up (text)",   style=shape.labelup, location=location.absolute, color=color.new(color.black, 100), size=size.tiny, text="H",  textcolor=color.black)
 alertcondition(green_cross_hull, title="Green Candle Crossed Hull Ribbon", message="Green candle crossed above Hull ribbon at {{close}}. SL at {{low}}")
 
 // ─── Red Candle Crosses Hull Ribbon ───────────────────────────────
