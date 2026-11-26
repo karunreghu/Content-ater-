@@ -1,104 +1,18 @@
 //@version=6
-indicator("Candle Dominance - Buyers vs Sellers", shorttitle = "Dominance", overlay = false, precision = 1)
+indicator("Buyer vs Seller Push", shorttitle = "Push", overlay = false)
 
-// ───────────── Inputs ─────────────
-grpP = "Pane"
-paneMode = input.string("Oscillator (RSI-style)", "Pane display", options = ["Oscillator (RSI-style)", "Volume columns"], group = grpP)
-oscLen   = input.int(14, "Oscillator length", minval = 1, group = grpP, tooltip = "Dominance Index = 100 x (buy volume over N bars) / (total volume over N bars). Above 50 buyers dominate, below 50 sellers dominate.")
-sigLen   = input.int(5, "Signal line length", minval = 1, group = grpP)
-upperLvl = input.float(60, "Upper level (buyers in control)",  minval = 50, maxval = 100, group = grpP)
-lowerLvl = input.float(40, "Lower level (sellers in control)", minval = 0,  maxval = 50,  group = grpP)
-showCols = input.bool(true, "Show per-candle buy % columns", group = grpP)
+// Buyers' push  = how far buyers lifted price from the candle's low  = Close - Low
+// Sellers' push = how far sellers dropped price from the candle's high = High - Close
+units = input.string("Price", "Show as", options = ["Price", "% of candle range"])
 
-grpC = "Classification"
-domThresh  = input.float(0.60, "Dominance threshold (share of range)", minval = 0.5, maxval = 1.0, step = 0.05, group = grpC, tooltip = "Buy share = (Close - Low) / (High - Low). At or above this value buyers dominate; at or below (1 - value) sellers dominate.")
-strongBody = input.float(0.60, "Strong body (body / range)", minval = 0.0, maxval = 1.0, step = 0.05, group = grpC)
-weakBody   = input.float(0.30, "Small body (body / range)",  minval = 0.0, maxval = 1.0, step = 0.05, group = grpC)
+rng       = high - low
+buyPush   = close - low
+sellPush  = high - close
+asPercent = units == "% of candle range"
 
-grpV = "Volume"
-volLen   = input.int(20, "Average volume length", minval = 1, group = grpV)
-highVolX = input.float(1.5, "High volume (x average)", minval = 1.0, step = 0.1, group = grpV)
+buyVal  = asPercent ? (rng > 0 ? 100 * buyPush  / rng : 50) : buyPush
+sellVal = asPercent ? (rng > 0 ? 100 * sellPush / rng : 50) : sellPush
 
-grpD = "Display"
-showTable  = input.bool(true, "Show info table for the last candle", group = grpD)
-
-// ───────────── Core calculations ─────────────
-vol      = nz(volume)
-rng      = high - low
-bodyPct  = rng > 0 ? math.abs(close - open) / rng : 0.0
-buyShare = rng > 0 ? (close - low) / rng : 0.5          // 0..1
-clv      = 2 * buyShare - 1                             // -1..+1
-buyVol   = vol * buyShare
-sellVol  = vol - buyVol
-delta    = buyVol - sellVol
-avgVol   = ta.sma(vol, volLen)
-rv       = avgVol > 0 ? vol / avgVol : 1.0
-noVolume = ta.cum(vol) == 0
-
-// Dominance Index (0-100), volume weighted; falls back to plain average when there is no volume
-sumVol = math.sum(vol, oscLen)
-domIdx = sumVol > 0 ? 100 * math.sum(buyVol, oscLen) / sumVol : 100 * ta.sma(buyShare, oscLen)
-signal = ta.ema(domIdx, sigLen)
-
-// ───────────── Classification ─────────────
-isHighVol  = rv >= highVolX
-buyersDom  = buyShare >= domThresh
-sellersDom = buyShare <= 1 - domThresh
-strongBuy  = buyersDom  and close > open and bodyPct >= strongBody and rv >= 1.0
-strongSell = sellersDom and close < open and bodyPct >= strongBody and rv >= 1.0
-absorption = bodyPct <= weakBody and isHighVol
-
-cStrongBuy  = #00C853
-cBuy        = #81C784
-cStrongSell = #D50000
-cSell       = #E57373
-cBalanced   = #9E9E9E
-cAbsorb     = #FFD600
-cLine       = #7E57C2
-
-stateColor = absorption ? cAbsorb : strongBuy ? cStrongBuy : buyersDom ? cBuy : strongSell ? cStrongSell : sellersDom ? cSell : cBalanced
-verdict    = absorption ? "Absorption" : strongBuy ? "Strong buyers" : buyersDom ? "Buyers" : strongSell ? "Strong sellers" : sellersDom ? "Sellers" : "Balanced"
-
-// ───────────── Pane: oscillator (RSI-style) ─────────────
-isOsc = paneMode == "Oscillator (RSI-style)"
-
-plot(isOsc and showCols ? buyShare * 100 : na, "Candle buy %", color = color.new(stateColor, 55), style = plot.style_columns, histbase = 50)
-pUp  = plot(isOsc ? upperLvl : na, "Upper level", color = color.new(color.gray, 40))
-pMid = plot(isOsc ? 50.0     : na, "Midline",     color = color.new(color.gray, 70))
-pLo  = plot(isOsc ? lowerLvl : na, "Lower level", color = color.new(color.gray, 40))
-fill(pUp, pLo, color = color.new(cLine, 92), title = "Band background")
-pDom = plot(isOsc ? domIdx : na, "Dominance index", color = cLine, linewidth = 2)
-plot(isOsc ? signal : na, "Signal", color = color.new(color.orange, 20), linewidth = 1)
-fill(pDom, pMid, 100, upperLvl, top_color = color.new(cStrongBuy, 0),   bottom_color = color.new(cStrongBuy, 100),  title = "Buyers zone fill")
-fill(pDom, pMid, lowerLvl, 0,   top_color = color.new(cStrongSell, 100), bottom_color = color.new(cStrongSell, 0),  title = "Sellers zone fill")
-
-// ───────────── Pane: volume columns ─────────────
-plot(not isOsc ? buyVol   : na, "Buy volume",     color = color.new(cStrongBuy,  isHighVol ? 0 : 50), style = plot.style_columns, format = format.volume)
-plot(not isOsc ? -sellVol : na, "Sell volume",    color = color.new(cStrongSell, isHighVol ? 0 : 50), style = plot.style_columns, format = format.volume)
-plot(not isOsc ? delta    : na, "Net delta",      color = delta >= 0 ? color.teal : color.orange, linewidth = 2, format = format.volume)
-plot(not isOsc ? avgVol   : na, "Average volume", color = color.new(color.gray, 30), format = format.volume)
-
-// ───────────── Info table ─────────────
-var table info = table.new(position.top_right, 2, 8, bgcolor = color.new(color.black, 15), border_width = 1)
-
-f_row(int r, string k, string v, color c) =>
-    table.cell(info, 0, r, k, text_color = color.silver, text_halign = text.align_left,  text_size = size.small)
-    table.cell(info, 1, r, v, text_color = c,            text_halign = text.align_right, text_size = size.small)
-
-if showTable and barstate.islast
-    f_row(0, "Verdict",     noVolume ? verdict + " (no volume)" : verdict, stateColor)
-    f_row(1, "Dominance",   str.tostring(domIdx, "#.0"), domIdx >= upperLvl ? cStrongBuy : domIdx <= lowerLvl ? cStrongSell : color.white)
-    f_row(2, "Buy vol",     str.tostring(buyVol,  format.volume) + "  (" + str.tostring(buyShare * 100, "#.0") + "%)", cStrongBuy)
-    f_row(3, "Sell vol",    str.tostring(sellVol, format.volume) + "  (" + str.tostring((1 - buyShare) * 100, "#.0") + "%)", cStrongSell)
-    f_row(4, "Net delta",   str.tostring(delta,   format.volume), delta >= 0 ? color.teal : color.orange)
-    f_row(5, "CLV",         str.tostring(clv, "#.00"), color.white)
-    f_row(6, "Body/range",  str.tostring(bodyPct * 100, "#") + "%", color.white)
-    f_row(7, "Rel volume",  str.tostring(rv, "#.00") + "x", isHighVol ? cAbsorb : color.white)
-
-// ───────────── Alerts ─────────────
-alertcondition(strongBuy,  "Strong buyers",  "Strong buyer dominance on {{ticker}} ({{interval}})")
-alertcondition(strongSell, "Strong sellers", "Strong seller dominance on {{ticker}} ({{interval}})")
-alertcondition(absorption, "Absorption",     "Absorption candle on {{ticker}} ({{interval}}): high volume, small body")
-alertcondition(ta.crossover(domIdx, upperLvl),  "Buyers take control",  "Dominance index crossed above upper level on {{ticker}} ({{interval}})")
-alertcondition(ta.crossunder(domIdx, lowerLvl), "Sellers take control", "Dominance index crossed below lower level on {{ticker}} ({{interval}})")
-alertcondition(ta.cross(domIdx, 50),            "Dominance flip",       "Dominance index crossed 50 on {{ticker}} ({{interval}})")
+plot(buyVal,   "Buyers pushed up",    color = #00C853, style = plot.style_columns)
+plot(-sellVal, "Sellers pushed down", color = #D50000, style = plot.style_columns)
+hline(0, "Zero", color = color.gray)
