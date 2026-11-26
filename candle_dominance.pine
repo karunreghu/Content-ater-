@@ -18,12 +18,8 @@ weakBody   = input.float(0.30, "Small body (body / range)",  minval = 0.0, maxva
 grpV = "Volume"
 volLen   = input.int(20, "Average volume length", minval = 1, group = grpV)
 highVolX = input.float(1.5, "High volume (x average)", minval = 1.0, step = 0.1, group = grpV)
-lowVolX  = input.float(0.7, "Low volume (x average)",  minval = 0.1, step = 0.1, group = grpV)
 
 grpD = "Display"
-colorBars  = input.bool(true, "Color price bars by dominance", group = grpD)
-showAbsorb = input.bool(true, "Mark absorption candles (high volume, small body)", group = grpD)
-showWeak   = input.bool(true, "Mark weak moves (big body, low volume)", group = grpD)
 showTable  = input.bool(true, "Show info table for the last candle", group = grpD)
 
 // ───────────── Core calculations ─────────────
@@ -46,13 +42,11 @@ signal = ta.ema(domIdx, sigLen)
 
 // ───────────── Classification ─────────────
 isHighVol  = rv >= highVolX
-isLowVol   = rv <= lowVolX
 buyersDom  = buyShare >= domThresh
 sellersDom = buyShare <= 1 - domThresh
 strongBuy  = buyersDom  and close > open and bodyPct >= strongBody and rv >= 1.0
 strongSell = sellersDom and close < open and bodyPct >= strongBody and rv >= 1.0
 absorption = bodyPct <= weakBody and isHighVol
-weakMove   = bodyPct >= strongBody and isLowVol
 
 cStrongBuy  = #00C853
 cBuy        = #81C784
@@ -83,11 +77,6 @@ plot(not isOsc ? buyVol   : na, "Buy volume",     color = color.new(cStrongBuy, 
 plot(not isOsc ? -sellVol : na, "Sell volume",    color = color.new(cStrongSell, isHighVol ? 0 : 50), style = plot.style_columns, format = format.volume)
 plot(not isOsc ? delta    : na, "Net delta",      color = delta >= 0 ? color.teal : color.orange, linewidth = 2, format = format.volume)
 plot(not isOsc ? avgVol   : na, "Average volume", color = color.new(color.gray, 30), format = format.volume)
-
-// ───────────── Price chart visuals ─────────────
-barcolor(colorBars ? stateColor : na)
-plotshape(showAbsorb and absorption, "Absorption", style = shape.diamond, location = location.abovebar, color = cAbsorb, size = size.tiny, force_overlay = true)
-plotshape(showWeak and weakMove, "Weak move", style = shape.xcross, location = location.belowbar, color = cBalanced, size = size.tiny, force_overlay = true)
 
 // ───────────── Info table ─────────────
 var table info = table.new(position.top_right, 2, 8, bgcolor = color.new(color.black, 15), border_width = 1)
