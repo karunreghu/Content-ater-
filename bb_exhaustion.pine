@@ -651,11 +651,13 @@ else if hl_dir != 0 and not bb_bands_opening
 
 bgcolor(showHL and hl_dir == 1 ? color.new(color.green, hlTransp) : showHL and hl_dir == -1 ? color.new(color.red, hlTransp) : na, title="EMA cross + BB expansion")
 
+hlLabelGap = input.float(2.0, "Label distance outside Bollinger Band (× ATR)", minval=0, step=0.1, group="EMA cross + BB expansion")
+
 if showHL and showHLLabel and hl_start
     if hl_cross_dir == 1
-        label.new(bar_index, low - atr, "▲ EMA✕ + BB↔", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(color.green, 70), textcolor=color.green, size=size.tiny, tooltip="Bullish EMA " + str.tostring(hlFastLen) + "/" + str.tostring(hlSlowLen) + " crossover followed by BB expansion. Up phase lasts until a band turns the other way.")
+        label.new(bar_index, lower - atr * hlLabelGap, "▲ EMA✕ + BB↔", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(color.green, 70), textcolor=color.green, size=size.tiny, tooltip="Bullish EMA " + str.tostring(hlFastLen) + "/" + str.tostring(hlSlowLen) + " crossover followed by BB expansion. Up phase lasts until a band turns the other way.")
     else
-        label.new(bar_index, high + atr, "▼ EMA✕ + BB↔", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(color.red, 70), textcolor=color.red, size=size.tiny, tooltip="Bearish EMA " + str.tostring(hlFastLen) + "/" + str.tostring(hlSlowLen) + " crossover followed by BB expansion. Down phase lasts until a band turns the other way.")
+        label.new(bar_index, upper + atr * hlLabelGap, "▼ EMA✕ + BB↔", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(color.red, 70), textcolor=color.red, size=size.tiny, tooltip="Bearish EMA " + str.tostring(hlFastLen) + "/" + str.tostring(hlSlowLen) + " crossover followed by BB expansion. Down phase lasts until a band turns the other way.")
 
 hl_end = hl_dir[1] != 0 and hl_dir == 0
 alertcondition(hl_start and hl_cross_dir == 1,  title="EMA cross + BB expansion (UP)",   message="Bullish EMA crossover followed by BB expansion: up phase started")
