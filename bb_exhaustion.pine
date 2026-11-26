@@ -369,17 +369,18 @@ table.cell(dotTable, 0, 0,
      text_size  = size.normal,
      bgcolor    = color.new(color.black, 100))
 
-// ─── H / H+ marker position: a little above the upper Bollinger Band ───
-hMarkGap = input.float(0.3, "H / H+ marker gap above upper BB (× ATR)", minval=0, step=0.1, group="Hull Suite")
-hMarkY   = upper + atr * hMarkGap
+// ─── H / H+ marker position: buy (green) a little below the lower BB, sell (red) a little above the upper BB ───
+hMarkGap  = input.float(0.3, "H / H+ marker gap from Bollinger Band (× ATR)", minval=0, step=0.1, group="Hull Suite")
+hMarkYBuy = lower - atr * hMarkGap
+hMarkY    = upper + atr * hMarkGap
 
 // ─── Green Candle Crosses Hull Ribbon ─────────────────────────────
 hullTop    = math.max(MHULL, SHULL)
 hullBottom = math.min(MHULL, SHULL)
 green_cross_hull     = is_green and open <= hullTop and close > hullTop
 green_cross_hull_vol = green_cross_hull and vol_ok
-plotshape(green_cross_hull_vol ? hMarkY : na,                          title="Hull Cross Up+V", style=shape.diamond, location=location.absolute, color=color.black, size=size.tiny, text="H+", textcolor=color.black)
-plotshape(green_cross_hull and not green_cross_hull_vol ? hMarkY : na, title="Hull Cross Up",   style=shape.diamond, location=location.absolute, color=color.black, size=size.tiny, text="H",  textcolor=color.black)
+plotshape(green_cross_hull_vol ? hMarkYBuy : na,                          title="Hull Cross Up+V", style=shape.diamond, location=location.absolute, color=color.black, size=size.tiny, text="H+", textcolor=color.black)
+plotshape(green_cross_hull and not green_cross_hull_vol ? hMarkYBuy : na, title="Hull Cross Up",   style=shape.diamond, location=location.absolute, color=color.black, size=size.tiny, text="H",  textcolor=color.black)
 alertcondition(green_cross_hull, title="Green Candle Crossed Hull Ribbon", message="Green candle crossed above Hull ribbon at {{close}}. SL at {{low}}")
 
 // ─── Red Candle Crosses Hull Ribbon ───────────────────────────────
