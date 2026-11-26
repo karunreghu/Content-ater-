@@ -1,0 +1,688 @@
+//@version=5
+indicator("TradersWalle | BB Exhaustion", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
+
+// ─── Inputs ───────────────────────────────────────────────────────
+lengthBB   = input.int(20,    "BB Length")
+mult       = input.float(2.0, "BB Multiplier")
+volLen     = input.int(20,    "Volume SMA Length")
+barsBack   = input.int(100,   "BB Touch Lookback (bars)", minval=1, maxval=500)
+slopeLen   = input.int(5,     "BB Direction Slope Lookback", minval=1)
+flatThresh = input.float(0.05,"BB Flat Threshold (%)", minval=0.01, step=0.01)
+showBBFill = input.bool(false, "Show BB Background Fill")
+bbLineWidth    = input.int(2, "BB Upper / Lower Line Width", minval=1, maxval=4)
+bbBasisWidth   = input.int(2, "BB Basis Line Width", minval=1, maxval=4)
+
+// ─── Hull Suite Inputs (InSilico-style) ────────────────────────────
+hullSource      = input.source(close, "Hull Source", group="Hull Suite")
+hullVariation   = input.string("Hma", "Hull Variation", options=["Hma", "Ehma", "Thma"], group="Hull Suite")
+hullLength      = input.int(55, "Hull Length (180-200 for floating S/R, 55 for swing entry)", group="Hull Suite")
+hullLengthMult  = input.float(1.0, "Hull Length Multiplier", group="Hull Suite")
+hullColorByTrend = input.bool(true, "Color Hull according to trend?", group="Hull Suite")
+hullShowBand     = input.bool(true, "Show as a Band?", group="Hull Suite")
+hullLineThickness = input.int(1, "Hull Line Thickness", minval=1, group="Hull Suite")
+hullBandTransparency = input.int(40, "Hull Band Transparency", minval=0, maxval=100, group="Hull Suite")
+hullShowVLines  = input.bool(true, "Show Vertical Line on Hull Color Change", group="Hull Suite")
+hullVLineStyle  = input.string("Dashed", "Vertical Line Style", options=["Solid", "Dashed", "Dotted"], group="Hull Suite")
+hullVLineWidth  = input.int(1, "Vertical Line Width", minval=1, maxval=4, group="Hull Suite")
+
+// ─── EMAs ─────────────────────────────────────────────────────────
+ema9   = ta.ema(close, 9)
+ema15  = ta.ema(close, 15)
+ema22  = ta.ema(close, 22)
+ema50  = ta.ema(close, 50)
+ema100 = ta.ema(close, 100)
+ema200 = ta.ema(close, 200)
+
+angle_deg = math.atan(ema9 - ema9[1]) * 180 / math.pi
+
+// ─── Bollinger Bands ──────────────────────────────────────────────
+basis = ta.sma(close, lengthBB)
+dev   = mult * ta.stdev(close, lengthBB)
+upper = basis + dev
+lower = basis - dev
+
+// ─── BB Direction Coloring ────────────────────────────────────────
+slopePercent = (basis - basis[slopeLen]) / basis[slopeLen] * 100
+bbIsUp       = slopePercent >  flatThresh
+bbIsDown     = slopePercent < -flatThresh
+bbMidColor   = bbIsUp ? color.green : bbIsDown ? color.red : color.orange
+bbFillColor  = showBBFill ? (bbIsUp ? color.new(color.green, 85) : bbIsDown ? color.new(color.red, 85) : color.new(color.orange, 85)) : na
+
+// ─── BB Band Angle Colors ─────────────────────────────────────────
+bb_upper_angle = math.atan(upper - upper[1]) * 180 / math.pi
+bb_lower_angle = math.atan(lower - lower[1]) * 180 / math.pi
+bbUpperColor   = bb_upper_angle > 0 ? color.green : color.red
+bbLowerColor   = bb_lower_angle > 0 ? color.green : color.red
+
+// ─── Volume ───────────────────────────────────────────────────────
+vol_ok = volume >= ta.sma(volume, volLen)
+
+// ─── Candle Helpers ───────────────────────────────────────────────
+is_green     = close > open
+is_red       = close < open
+body         = math.abs(close - open)
+upperW       = high - math.max(open, close)
+lowerW       = math.min(open, close) - low
+candleHeight = high - low
+
+// ─── Candle Patterns ──────────────────────────────────────────────
+is_hammer   = lowerW >= 2.0 * body and upperW <= body
+is_marubozu = body >= 0.8 * candleHeight
+bull_engulf = is_green and (close[1] < open[1]) and open <= close[1] and close >= open[1]
+
+// ─── Green After Red Signal ───────────────────────────────────────
+prev_is_red        = close[1] < open[1]
+green_after_red    = is_green and prev_is_red and close > open[1]
+green_after_red_vol = green_after_red and vol_ok
+
+// ─── BB Exhaustion ────────────────────────────────────────────────
+green_touch_lower = is_green and low <= lower
+bb_high_vol       = green_touch_lower and vol_ok
+
+// ─── EMA Angle Signal ─────────────────────────────────────────────
+ema_angle_cross_up  = angle_deg > 0 and angle_deg[1] <= 0
+trigger_after_touch = ema_angle_cross_up and ta.barssince(green_touch_lower) < barsBack
+
+// ─── Opposite Symbol (only for NSE/BSE index options) ─────────────
+opt_m           = str.match(syminfo.ticker, "[0-9][CP][0-9.]+$")
+is_index_option = (syminfo.prefix == "NSE" or syminfo.prefix == "BSE") and opt_m != ""
+// Placeholder when not an option: Pine evaluates str.substring even when the result isn't used, and it fails on "".
+opt_x           = opt_m != "" ? opt_m : "0C0"
+is_call         = is_index_option and str.substring(opt_x, 1, 2) == "C"
+opp_m           = str.substring(opt_x, 0, 1) + (is_call ? "P" : "C") + str.substring(opt_x, 2)
+opp_symbol      = is_index_option ? syminfo.prefix + ":" + str.replace(syminfo.ticker, opt_x, opp_m) : syminfo.tickerid
+
+// ─── Opposite Symbol Data ─────────────────────────────────────────
+[opp_close, opp_open, opp_low, opp_volume, opp_basis, opp_dev, opp_vol_sma] = request.security(opp_symbol, timeframe.period, [close, open, low, volume, ta.sma(close, lengthBB), ta.stdev(close, lengthBB) * mult, ta.sma(volume, volLen)])
+
+opp_lower             = opp_basis - opp_dev
+opp_upper             = opp_basis + opp_dev
+opp_vol_ok            = opp_volume >= opp_vol_sma
+opp_is_green          = opp_close > opp_open
+opp_green_touch_lower = opp_is_green and opp_low <= opp_lower
+opp_bb_high_vol       = opp_green_touch_lower and opp_vol_ok
+
+opp_ema9      = ta.ema(opp_close, 9)
+opp_angle_deg = math.atan(opp_ema9 - opp_ema9[1]) * 180 / math.pi
+
+opp_angle_cross_up = opp_angle_deg > 0 and opp_angle_deg[1] <= 0
+opp_trigger        = opp_angle_cross_up and ta.barssince(green_touch_lower) < barsBack
+opp_trigger_vol    = opp_trigger and opp_vol_ok
+
+// ─── BB Squeeze / Expansion ───────────────────────────────────────
+bbWidth          = upper - lower
+bb_squeeze_end   = (bbWidth > bbWidth[1]) and not (bbWidth[1] > bbWidth[2])
+bb_bands_opening = ((math.atan(lower - lower[1]) * 180 / math.pi) < 0) and ((math.atan(upper - upper[1]) * 180 / math.pi) > 0)
+// bb_converging    = bbWidth < bbWidth[1]
+bb_converging    = bb_upper_angle < 0 and bb_lower_angle > 0
+
+// ─── Opposite BB Squeeze / Expansion ──────────────────────────────
+opp_bands_opening = ((math.atan(opp_lower - opp_lower[1]) * 180 / math.pi) < 0) and ((math.atan(opp_upper - opp_upper[1]) * 180 / math.pi) > 0)
+
+// ─── Both Sides Expanding (Golden Star) ───────────────────────────
+both_bb_opening = bb_bands_opening and opp_bands_opening
+
+// ─── Hull Suite (InSilico-style) ───────────────────────────────────
+f_hull_hma(_src, _len) =>
+    ta.hma(_src, _len)
+
+f_hull_ehma(_src, _len) =>
+    ta.ema(ta.ema(_src, _len / 2), math.round(math.sqrt(_len)))
+
+f_hull_thma(_src, _len) =>
+    ta.wma(ta.wma(_src, _len / 3) * 3 - ta.wma(_src, _len / 2) - ta.wma(_src, _len), _len)
+
+hullEffLength = math.round(hullLength * hullLengthMult)
+hullRaw = hullVariation == "Hma" ? f_hull_hma(hullSource, hullEffLength) : hullVariation == "Ehma" ? f_hull_ehma(hullSource, hullEffLength) : f_hull_thma(hullSource, hullEffLength)
+
+MHULL = hullRaw
+SHULL = hullRaw[2]
+hullIsUp        = hullRaw > hullRaw[2]
+hullLineColor   = hullColorByTrend ? (hullIsUp ? color.lime : color.red) : color.gray
+hullBandColor   = hullShowBand ? color.new(hullLineColor, hullBandTransparency) : na
+
+pMHULL = plot(MHULL, "MHULL", color=hullLineColor, linewidth=hullLineThickness, display=display.all - display.price_scale)
+pSHULL = plot(SHULL, "SHULL", color=hullLineColor, linewidth=hullLineThickness, display=display.all - display.price_scale)
+fill(pMHULL, pSHULL, color=hullBandColor, title="Hull Suite Band")
+
+hull_turned_green = hullIsUp and not hullIsUp[1]
+hull_turned_red   = (not hullIsUp) and hullIsUp[1]
+alertcondition(hull_turned_green, title="Hull Suite Turned Green", message="Hull Suite trend turned bullish")
+alertcondition(hull_turned_red,   title="Hull Suite Turned Red",   message="Hull Suite trend turned bearish")
+
+// ─── Hull Color Change Vertical Lines ─────────────────────────────
+// The two points must have DIFFERENT prices. On a flat candle (high == low) both points were
+// the same, and extend.both then drew the line HORIZONTALLY across the chart.
+// Padding by one tick above and below guarantees a truly vertical line.
+vStyle = hullVLineStyle == "Solid" ? line.style_solid : hullVLineStyle == "Dotted" ? line.style_dotted : line.style_dashed
+vY1    = low  - syminfo.mintick
+vY2    = high + syminfo.mintick
+if hullShowVLines and hull_turned_green
+    line.new(bar_index, vY1, bar_index, vY2, xloc=xloc.bar_index, extend=extend.both, color=color.new(color.lime, 20), style=vStyle, width=hullVLineWidth)
+if hullShowVLines and hull_turned_red
+    line.new(bar_index, vY1, bar_index, vY2, xloc=xloc.bar_index, extend=extend.both, color=color.new(color.red, 20), style=vStyle, width=hullVLineWidth)
+
+// ─── Plots ────────────────────────────────────────────────────────
+pU = plot(upper, "BB Upper", color=bbUpperColor, linewidth=bbLineWidth,  display=display.all - display.price_scale)
+pL = plot(lower, "BB Lower", color=bbLowerColor, linewidth=bbLineWidth,  display=display.all - display.price_scale)
+plot(basis, "BB Basis",      color=color.black,  linewidth=bbBasisWidth, display=display.all - display.price_scale)
+fill(pU, pL, color=bbFillColor)
+// bbShrinkFillColor = bb_converging ? color.new(color.gray, 82) : na
+// fill(pU, pL, color=bbShrinkFillColor, title="BB Shrink Fill")
+
+// 9 EMA: red when its angle is below zero (falling), green otherwise (rising / flat)
+ema9Color = angle_deg < 0 ? color.red : color.green
+plot(ema9,   color=ema9Color, title="9 EMA",   display=display.all)
+plot(ema15,  color=color.rgb(101, 67, 33, 40), title="15 EMA",  display=display.all)
+plot(ema22,  color=color.rgb(101, 67, 33, 40), title="22 EMA",  display=display.all - display.price_scale)
+plot(ema50,  color=color.rgb(101, 67, 33, 40), title="50 EMA",  linewidth=2, display=display.all - display.price_scale)
+plot(ema100, color=color.rgb(101, 67, 33, 40), title="100 EMA", display=display.all - display.price_scale)
+plot(ema200, color=color.rgb(101, 67, 33, 40), title="200 EMA", display=display.all - display.price_scale)
+
+// ─── Helper plots for edge fills ──────────────────────────────────
+topEdge    = plot(upper + 20, "Top Edge",    color=na)
+bottomEdge = plot(lower - 20, "Bottom Edge", color=na)
+
+// ─── Squeeze / Expansion fill color ────────────────────────────────
+sqColor = bb_squeeze_end   ? color.new(color.teal,   75) : na
+exColor = bb_bands_opening ? color.new(color.yellow, 75) : na
+divColor = bb_converging ? color.new(color.red, 80) : na
+
+fill(topEdge, pU, color=sqColor, title="BB Squeeze Above")
+fill(pL, bottomEdge, color=sqColor, title="BB Squeeze Below")
+
+fill(topEdge, pU, color=exColor, title="BB Opening Above")
+fill(pL, bottomEdge, color=exColor, title="BB Opening Below")
+
+fill(topEdge, pU, color=divColor, title="BB Coverging Above")
+fill(pL, bottomEdge, color=divColor, title="BB Converging Below")
+
+// ─── Pattern condition ────────────────────────────────────────────
+var touched_lower = false
+if green_touch_lower
+    touched_lower := true
+if trigger_after_touch
+    touched_lower := false
+
+has_pattern       = is_hammer or (is_marubozu and is_green) or (bull_engulf and is_green)
+alert_bb_pattern  = (bb_high_vol or green_touch_lower) and has_pattern
+alert_ema_pattern = trigger_after_touch and has_pattern
+
+// ─── Index Detection ──────────────────────────────────────────────
+raw_ticker   = str.replace(syminfo.ticker, "NSE:", "")
+is_nifty50   = str.startswith(raw_ticker, "NIFTY") and not str.startswith(raw_ticker, "BANKNIFTY") and not str.startswith(raw_ticker, "FINNIFTY") and not str.startswith(raw_ticker, "MIDCPNIFTY")
+is_banknifty = str.startswith(raw_ticker, "BANKNIFTY")
+is_finnifty  = str.startswith(raw_ticker, "FINNIFTY")
+is_midcap    = str.startswith(raw_ticker, "MIDCPNIFTY")
+is_sensex    = str.startswith(raw_ticker, "BSX")
+
+index_name   = is_banknifty ? "BANKNIFTY" : is_finnifty ? "FINNIFTY" : is_midcap ? "MIDCPNIFTY" : is_sensex ? "SENSEX" : is_nifty50 ? "NIFTY" : "UNKNOWN"
+index_symbol = is_banknifty ? "NSE:NIFTYBANK" : is_finnifty ? "NSE:FINNIFTY" : is_midcap ? "NSE:MIDCPNIFTY" : is_sensex ? "BSE:SENSEX" : is_nifty50 ? "NSE:NIFTY" : ""
+
+// ─── Index Data ───────────────────────────────────────────────────
+has_idx        = is_index_option and index_symbol != ""
+idx_req_symbol = has_idx ? index_symbol : syminfo.tickerid
+[idx_close, idx_open, idx_high, idx_low, idx_basis, idx_dev] = request.security(idx_req_symbol, timeframe.period, [close, open, high, low, ta.sma(close, lengthBB), ta.stdev(close, lengthBB) * mult])
+[idx_vol, idx_vol_sma] = request.security(idx_req_symbol, timeframe.period, [volume, ta.sma(volume, volLen)])
+
+
+idx_upper    = idx_basis + idx_dev
+idx_lower    = idx_basis - idx_dev
+idx_is_green = idx_close > idx_open
+idx_is_red   = idx_close < idx_open
+idx_vol_ok   = idx_vol >= idx_vol_sma
+
+// ─── Index BB Exhaustion ──────────────────────────────────────────
+idx_bb_bull     = idx_is_green and idx_low  <= idx_lower
+idx_bb_bear     = idx_is_red   and idx_high >= idx_upper
+idx_bb_bull_vol = idx_bb_bull and idx_vol_ok
+idx_bb_bear_vol = idx_bb_bear and idx_vol_ok
+idx_exhaust     = is_call ? idx_bb_bull     : idx_bb_bear
+idx_exhaust_vol = is_call ? idx_bb_bull_vol : idx_bb_bear_vol
+
+// ─── Index Candle Patterns ────────────────────────────────────────
+idx_body        = math.abs(idx_close - idx_open)
+idx_upperW      = idx_high - math.max(idx_open, idx_close)
+idx_lowerW      = math.min(idx_open, idx_close) - idx_low
+idx_candleH     = idx_high - idx_low
+idx_is_hammer   = idx_lowerW >= 2.0 * idx_body and idx_upperW <= idx_body
+idx_is_marubozu = idx_body >= 0.8 * idx_candleH
+idx_bull_engulf = idx_is_green and (idx_close[1] < idx_open[1]) and idx_open <= idx_close[1] and idx_close >= idx_open[1]
+
+// ─── Same-candle confluence alerts ───────────────────────────────
+same_candle_e_b     = (green_touch_lower) and (ema_angle_cross_up)
+same_candle_e_b_vol = same_candle_e_b and vol_ok
+
+// ─── B / B+ with Close Above Prev Candle Body ────────────────────
+close_above_prev = close > math.max(open[1], close[1])
+
+b_signal      = green_touch_lower and close_above_prev
+b_plus_signal = bb_high_vol       and close_above_prev
+
+// ─── E / E+ confirmed ────────────────────────────────────────────
+e_signal      = trigger_after_touch and close_above_prev
+e_plus_signal = trigger_after_touch and close_above_prev and vol_ok
+
+// ─── MACD for Angle ───────────────────────────────────────────────
+macd_fast  = ta.ema(close, 12)
+macd_slow  = ta.ema(close, 26)
+macd_line  = macd_fast - macd_slow
+macd_angle = math.atan(macd_line - macd_line[1]) * 180 / math.pi
+
+// ─── Shapes: Current Symbol ───────────────────────────────────────
+green_open_below_lower     = is_green and open < lower
+green_open_below_lower_vol = green_open_below_lower and vol_ok
+plotshape(green_open_below_lower_vol,                 title="BB+V", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 30), size=size.tiny, text="")
+plotshape(green_open_below_lower and not bb_high_vol, title="BB",   style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 30), size=size.tiny, text="")
+alertcondition(green_open_below_lower_vol,                                title="Potential Buy", message="Potential Buy at {{high}}. SL at {{low}}")
+alertcondition(green_open_below_lower and not green_open_below_lower_vol, title="Potential Buy", message="Potential Buy at {{high}}. SL at {{low}}")
+
+red_open_above_upper       = is_red and open > upper
+red_open_above_upper_vol   = red_open_above_upper and vol_ok
+plotshape(red_open_above_upper_vol,                              title="BB Bear+V", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 40), size=size.tiny, text="")
+plotshape(red_open_above_upper and not red_open_above_upper_vol, title="BB Bear",   style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 40), size=size.tiny, text="")
+
+// ─── Engulfing: star at the TOP / BOTTOM of the chart (not next to the candle) ───
+bull_body_engulf = is_green and open < math.min(open[1], close[1]) and close > math.max(open[1], close[1])
+bear_body_engulf = is_red and open > math.max(open[1], close[1]) and close < math.min(open[1], close[1])
+atr = ta.atr(14)
+
+showEngulf     = input.bool(true, "Show engulfing star", group="Engulfing")
+engulfMode     = input.string("Chart top/bottom", "Star position", options=["Chart top/bottom", "Rolling high/low (hover message)"], group="Engulfing", tooltip="Chart top/bottom: stars are pinned to the very top / bottom of the chart pane. Pine cannot show a hover message there, so the message is in the Data Window / status line instead.\nRolling high/low: stars float at the recent highest high / lowest low and show the engulfing message on hover / tap.")
+engulfLookback = input.int(50, "Rolling mode: lookback bars for high/low", minval=5, maxval=500, group="Engulfing")
+engulfGap      = input.float(1.0, "Rolling mode: distance beyond high/low (× ATR)", minval=0, step=0.1, group="Engulfing")
+engulfSize     = input.string("Tiny", "Star size", options=["Tiny", "Small", "Normal", "Large"], group="Engulfing")
+engSize        = engulfSize == "Tiny" ? size.tiny : engulfSize == "Small" ? size.small : engulfSize == "Normal" ? size.normal : size.large
+
+edgeMode  = showEngulf and engulfMode == "Chart top/bottom"
+rollMode  = showEngulf and engulfMode == "Rolling high/low (hover message)"
+
+// Mode 1: pinned to the chart edges (title shows in the Data Window / status line)
+// plotchar needs a constant size, so one call per size; only the selected size is drawn
+plotchar(edgeMode and engulfSize == "Tiny"   and bull_body_engulf, title="Bullish Engulfing (Tiny)",   char="o", location=location.bottom, color=color.green, size=size.tiny)
+plotchar(edgeMode and engulfSize == "Small"  and bull_body_engulf, title="Bullish Engulfing (Small)",  char="o", location=location.bottom, color=color.green, size=size.small)
+plotchar(edgeMode and engulfSize == "Normal" and bull_body_engulf, title="Bullish Engulfing (Normal)", char="o", location=location.bottom, color=color.green, size=size.normal)
+plotchar(edgeMode and engulfSize == "Large"  and bull_body_engulf, title="Bullish Engulfing (Large)",  char="o", location=location.bottom, color=color.green, size=size.large)
+
+plotchar(edgeMode and engulfSize == "Tiny"   and bear_body_engulf, title="Bearish Engulfing (Tiny)",   char="o", location=location.top, color=color.red, size=size.tiny)
+plotchar(edgeMode and engulfSize == "Small"  and bear_body_engulf, title="Bearish Engulfing (Small)",  char="o", location=location.top, color=color.red, size=size.small)
+plotchar(edgeMode and engulfSize == "Normal" and bear_body_engulf, title="Bearish Engulfing (Normal)", char="o", location=location.top, color=color.red, size=size.normal)
+plotchar(edgeMode and engulfSize == "Large"  and bear_body_engulf, title="Bearish Engulfing (Large)",  char="o", location=location.top, color=color.red, size=size.large)
+
+// Mode 2: floating labels at the rolling extreme, with a hover / tap tooltip
+engHigh    = ta.highest(high, engulfLookback)
+engLow     = ta.lowest(low, engulfLookback)
+prevBodyHi = math.max(open[1], close[1])
+prevBodyLo = math.min(open[1], close[1])
+
+if rollMode and barstate.isconfirmed and bull_body_engulf
+    bull_tip = "Bullish Engulfing\nGreen body fully engulfs the previous candle's body\nPrev body: " + str.tostring(prevBodyLo, format.mintick) + " - " + str.tostring(prevBodyHi, format.mintick) + "\nThis body: " + str.tostring(open, format.mintick) + " - " + str.tostring(close, format.mintick)
+    label.new(bar_index, engLow - atr * engulfGap, "★", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, textcolor=color.green, size=engSize, tooltip=bull_tip)
+
+if rollMode and barstate.isconfirmed and bear_body_engulf
+    bear_tip = "Bearish Engulfing\nRed body fully engulfs the previous candle's body\nPrev body: " + str.tostring(prevBodyLo, format.mintick) + " - " + str.tostring(prevBodyHi, format.mintick) + "\nThis body: " + str.tostring(close, format.mintick) + " - " + str.tostring(open, format.mintick)
+    label.new(bar_index, engHigh + atr * engulfGap, "★", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, textcolor=color.red, size=engSize, tooltip=bear_tip)
+
+// ─── Red Closed Below Lower BB → Green Follow-through ────────────
+prev_red_below_lower     = (close[1] < open[1]) and (close[1] < lower[1])
+green_after_red_bb       = is_green and prev_red_below_lower
+green_after_red_bb_vol   = green_after_red_bb and vol_ok
+
+// ─── 5-min Lower BB touch check ──────────────────────────────────
+f_lower5() =>
+    ta.sma(close, lengthBB) - mult * ta.stdev(close, lengthBB)
+f_lower5_prev() =>
+    lb = ta.sma(close, lengthBB) - mult * ta.stdev(close, lengthBB)
+    lb[1]
+chartSec = timeframe.in_seconds()
+ltfTf = chartSec >= 300 ? "5" : timeframe.period
+[ltfLows, ltfLowers] = request.security_lower_tf(syminfo.tickerid, ltfTf, [low, f_lower5()])
+bool touch5_ltf = false
+if array.size(ltfLows) > 0
+    for i = 0 to array.size(ltfLows) - 1
+        lb = array.get(ltfLowers, i)
+        if not na(lb) and array.get(ltfLows, i) <= lb
+            touch5_ltf := true
+
+prev5Lower = request.security(syminfo.tickerid, "5", f_lower5_prev(), lookahead=barmerge.lookahead_on)
+touch5_htf = not na(prev5Lower) and low <= prev5Lower
+touch5 = chartSec >= 300 ? touch5_ltf : touch5_htf
+
+gar5      = green_after_red_bb and touch5
+gar5_vol  = gar5 and vol_ok
+garN      = green_after_red_bb and not touch5
+garN_vol  = garN and vol_ok
+plotshape(garN_vol,              title="Red BB→Green+V",         style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 20), size=size.small, text="")
+plotshape(garN and not garN_vol, title="Red BB→Green",           style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 40), size=size.small, text="")
+plotshape(gar5_vol,              title="Red BB→Green+V (5m BB)", style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 0),    size=size.small, text="5m+", textcolor=color.lime)
+plotshape(gar5 and not gar5_vol, title="Red BB→Green (5m BB)",   style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 10), size=size.small, text="5m",  textcolor=color.green)
+alertcondition(garN_vol,              title="Potential Buy",             message="Potential Buy at {{high}}. SL at {{low}}")
+alertcondition(garN and not garN_vol, title="Potential Buy",             message="Potential Buy at {{high}}. SL at {{low}}")
+alertcondition(gar5_vol,              title="Potential Buy + 5m BB (V)", message="Potential Buy (5m lower BB touch, high vol) at {{high}}. SL at {{low}}")
+alertcondition(gar5 and not gar5_vol, title="Potential Buy + 5m BB",     message="Potential Buy (5m lower BB touch) at {{high}}. SL at {{low}}")
+
+// ─── EMA9 vs EMA15 Status Dot ─────────────────────────────────────
+var table dotTable = table.new(position.top_right, 1, 1, border_width=0)
+table.cell(dotTable, 0, 0,
+     text       = "⬤",
+     text_color = ema9 > ema15 ? color.new(color.green, 0) : color.new(color.red, 0),
+     text_size  = size.normal,
+     bgcolor    = color.new(color.black, 100))
+
+// ─── H / H+ marker position: a little above the upper Bollinger Band ───
+hMarkGap = input.float(0.3, "H / H+ marker gap above upper BB (× ATR)", minval=0, step=0.1, group="Hull Suite")
+hMarkY   = upper + atr * hMarkGap
+
+// ─── Green Candle Crosses Hull Ribbon ─────────────────────────────
+hullTop    = math.max(MHULL, SHULL)
+hullBottom = math.min(MHULL, SHULL)
+green_cross_hull     = is_green and open <= hullTop and close > hullTop
+green_cross_hull_vol = green_cross_hull and vol_ok
+plotshape(green_cross_hull_vol ? hMarkY : na,                          title="Hull Cross Up+V", style=shape.diamond, location=location.absolute, color=color.black, size=size.tiny, text="H+", textcolor=color.black)
+plotshape(green_cross_hull and not green_cross_hull_vol ? hMarkY : na, title="Hull Cross Up",   style=shape.diamond, location=location.absolute, color=color.black, size=size.tiny, text="H",  textcolor=color.black)
+alertcondition(green_cross_hull, title="Green Candle Crossed Hull Ribbon", message="Green candle crossed above Hull ribbon at {{close}}. SL at {{low}}")
+
+// ─── Red Candle Crosses Hull Ribbon ───────────────────────────────
+red_cross_hull     = is_red and open >= hullBottom and close < hullBottom
+red_cross_hull_vol = red_cross_hull and vol_ok
+plotshape(red_cross_hull_vol ? hMarkY : na,                        title="Hull Cross Down+V", style=shape.diamond, location=location.absolute, color=color.red, size=size.tiny, text="H+", textcolor=color.red)
+plotshape(red_cross_hull and not red_cross_hull_vol ? hMarkY : na, title="Hull Cross Down",   style=shape.diamond, location=location.absolute, color=color.red, size=size.tiny, text="H",  textcolor=color.red)
+alertcondition(red_cross_hull, title="Red Candle Crossed Hull Ribbon", message="Red candle crossed below Hull ribbon at {{close}}. SL at {{high}}")
+
+
+//>>>>>>>>>>>>>>>>>>>>>>
+// ─── Buy-signal check labels (same rules as the Python Telegram/Discord alerts) ───
+opp_side_name = is_call ? "PE" : "CE"
+opp_high      = request.security(opp_symbol, timeframe.period, high)
+
+chk_opposite   = opp_close < opp_open and opp_high >= opp_upper
+chk_index      = idx_exhaust
+chk_engulf     = close[1] < open[1] and close >= open[1]
+chk_opp_engulf = opp_close < opp_open and opp_close < opp_open[1]
+chk_idx_engulf = is_call ? (idx_is_green and idx_close >= idx_open[1]) : (idx_is_red and idx_close < idx_open[1])
+
+labelGap  = input.float(2.5, "Check label gap below candle (× ATR)", minval=0, step=0.5, group="Check labels")
+labelSize = input.string("Tiny", "Check label size", options=["Tiny", "Small", "Normal"], group="Check labels")
+lblSize   = labelSize == "Tiny" ? size.tiny : labelSize == "Small" ? size.small : size.normal
+
+f_mark(ok, avail) => avail ? (ok ? "✅" : "❌") : "n/a"
+f_n(ok, avail) => avail and ok ? 1 : 0
+f_a(avail) => avail ? 1 : 0
+
+if green_open_below_lower and barstate.isconfirmed
+    passed = f_n(chk_opposite, is_index_option) + f_n(chk_index, has_idx) + f_n(chk_engulf, true) + f_n(chk_opp_engulf, is_index_option) + f_n(chk_idx_engulf, has_idx)
+    total  = f_a(is_index_option) * 2 + f_a(has_idx) * 2 + 1
+    d1 = f_mark(chk_opposite, is_index_option) + "  Opposite " + (is_index_option ? opp_side_name : "")
+    d2 = f_mark(chk_index, has_idx) + "  Index"
+    d3 = f_mark(chk_engulf, true) + "  Engulfing"
+    d4 = f_mark(chk_opp_engulf, is_index_option) + "  Opposite Engulfing"
+    d5 = f_mark(chk_idx_engulf, has_idx) + "  Index Engulfing"
+    details = d1 + "\n" + d2 + "\n" + d3 + "\n" + d4 + "\n" + d5
+    badgeColor = passed >= total - 1 and passed > 0 ? color.new(color.green, 20) : passed >= 1 ? color.new(color.orange, 20) : color.new(color.gray, 30)
+    label.new(bar_index, low - atr * labelGap, str.tostring(passed) + "/" + str.tostring(total), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=badgeColor, textcolor=color.white, size=lblSize, tooltip=details)
+
+// ─── H / H+ checks: opposite strike and index vs their own Hull ribbon ───
+hullLabelGap = input.float(4.5, "H check label gap below candle (× ATR)", minval=0, step=0.5, group="Check labels")
+
+// Hull ribbon of whatever symbol request.security runs this on (uses close, same variation and length as the chart).
+f_hull_ribbon() =>
+    hh = f_hull_hma(close, hullEffLength)
+    he = f_hull_ehma(close, hullEffLength)
+    ht = f_hull_thma(close, hullEffLength)
+    h  = hullVariation == "Hma" ? hh : hullVariation == "Ehma" ? he : ht
+    [open, close, math.max(h, h[2]), math.min(h, h[2])]
+
+[opp_h_open, opp_h_close, opp_h_top, opp_h_bot] = request.security(opp_symbol, timeframe.period, f_hull_ribbon())
+[idx_h_open, idx_h_close, idx_h_top, idx_h_bot] = request.security(idx_req_symbol, timeframe.period, f_hull_ribbon())
+
+// Opposite strike: red candle crossing below its Hull ribbon (mirror of the red "H" rule).
+hchk_opp = opp_h_close < opp_h_open and opp_h_open >= opp_h_bot and opp_h_close < opp_h_bot
+// Index: CE chart -> green candle crossing above the index Hull; PE chart -> red candle crossing below it.
+hchk_idx_up   = idx_h_close > idx_h_open and idx_h_open <= idx_h_top and idx_h_close > idx_h_top
+hchk_idx_down = idx_h_close < idx_h_open and idx_h_open >= idx_h_bot and idx_h_close < idx_h_bot
+hchk_idx      = is_call ? hchk_idx_up : hchk_idx_down
+
+if green_cross_hull and barstate.isconfirmed and is_index_option
+    h_passed  = f_n(hchk_opp, true) + f_n(hchk_idx, has_idx)
+    h_total   = 1 + f_a(has_idx)
+    h1 = f_mark(hchk_opp, true) + "  Opposite " + opp_side_name + " Hull Cross (red)"
+    h2 = f_mark(hchk_idx, has_idx) + "  Index Hull Cross " + (is_call ? "(green)" : "(red)")
+    h_details = h1 + "\n" + h2
+    h_color = h_passed == h_total ? color.new(color.green, 20) : h_passed >= 1 ? color.new(color.orange, 20) : color.new(color.gray, 30)
+    label.new(bar_index, low - atr * hullLabelGap, "H " + str.tostring(h_passed) + "/" + str.tostring(h_total), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=h_color, textcolor=color.white, size=lblSize, tooltip=h_details)
+
+// ─── Red H / H+ checks (mirror of the green ones) ───
+// Opposite strike: green candle crossing above its Hull ribbon.
+hchk_opp_dn = opp_h_close > opp_h_open and opp_h_open <= opp_h_top and opp_h_close > opp_h_top
+// Index: CE chart -> red candle crossing below the index Hull; PE chart -> green candle crossing above it.
+hchk_idx_dn = is_call ? hchk_idx_down : hchk_idx_up
+
+if red_cross_hull and barstate.isconfirmed and is_index_option
+    hr_passed = f_n(hchk_opp_dn, true) + f_n(hchk_idx_dn, has_idx)
+    hr_total  = 1 + f_a(has_idx)
+    hr1 = f_mark(hchk_opp_dn, true) + "  Opposite " + opp_side_name + " Hull Cross (green)"
+    hr2 = f_mark(hchk_idx_dn, has_idx) + "  Index Hull Cross " + (is_call ? "(red)" : "(green)")
+    hr_details = hr1 + "\n" + hr2
+    hr_color = hr_passed == hr_total ? color.new(color.red, 20) : hr_passed >= 1 ? color.new(color.orange, 20) : color.new(color.gray, 30)
+    label.new(bar_index, high + atr * hullLabelGap, "H " + str.tostring(hr_passed) + "/" + str.tostring(hr_total), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=hr_color, textcolor=color.white, size=lblSize, tooltip=hr_details)
+
+// ─── Long position box on every buy signal (entry = high, SL = low, target 1:2) ───
+// The box keeps growing bar by bar (including the live candle) and is retired on the
+// confirmed candle where the target or the stop-loss is hit.
+showRR    = input.bool(false, "Show long position box on BB buy signal", group="Position boxes")
+showRRH   = input.bool(false, "Show long position box on H / H+ signal", group="Position boxes")
+rrRatio   = input.float(2.0, "Reward : Risk", minval=0.5, step=0.5, group="Position boxes")
+rrMaxBars = input.int(100, "Close box after (bars) if neither is hit", minval=2, maxval=500, group="Position boxes")
+
+// Transparency: 0 = solid, 100 = invisible
+tpFillTransp    = input.int(95, "Target (profit) zone fill transparency", minval=0, maxval=100, group="Position boxes")
+slFillTransp    = input.int(95, "Stop-loss zone fill transparency",       minval=0, maxval=100, group="Position boxes")
+boxBorderTransp = input.int(40, "Box border transparency",                minval=0, maxval=100, group="Position boxes")
+showHitLabels   = input.bool(true, "Show 'SL: x' / 'TP: x' label (x = points) near the level that was hit", group="Position boxes")
+hitLblBgTransp  = input.int(85, "SL / TP label background transparency (higher = lighter)", minval=0, maxval=100, group="Position boxes")
+
+var array<box>   rr_tp_boxes = array.new<box>()
+var array<box>   rr_sl_boxes = array.new<box>()
+var array<line>  rr_lines    = array.new<line>()
+var array<float> rr_tps      = array.new<float>()
+var array<float> rr_sls      = array.new<float>()
+var array<float> rr_entries  = array.new<float>()
+var array<int>   rr_starts   = array.new<int>()
+
+// 1) Extend open positions to the current bar on EVERY tick (so the live candle is inside the box).
+//    Retire (remove from tracking) only on confirmed bars, so an intrabar wick can't end a position early.
+//    If SL and TP are both touched inside the same candle, SL is assumed (conservative).
+if array.size(rr_tps) > 0
+    for i = array.size(rr_tps) - 1 to 0
+        hit_sl = low <= array.get(rr_sls, i)
+        hit_tp = high >= array.get(rr_tps, i)
+        aged   = bar_index - array.get(rr_starts, i) >= rrMaxBars
+        box.set_right(array.get(rr_tp_boxes, i), bar_index)
+        box.set_right(array.get(rr_sl_boxes, i), bar_index)
+        line.set_x2(array.get(rr_lines, i), bar_index)
+        if barstate.isconfirmed and (hit_sl or hit_tp or aged)
+            if showHitLabels
+                // Points = distance from entry to the level that was hit
+                sl_pts  = array.get(rr_entries, i) - array.get(rr_sls, i)
+                tp_pts  = array.get(rr_tps, i) - array.get(rr_entries, i)
+                exp_pts = close - array.get(rr_entries, i)
+                hit_txt = hit_sl ? "SL: " + str.tostring(sl_pts, "#.##") : hit_tp ? "TP: " + str.tostring(tp_pts, "#.##") : "Exp: " + str.tostring(exp_pts, "#.##")
+                hit_txt_col = hit_sl ? color.red : hit_tp ? color.teal : color.gray
+                hit_bg_col  = color.new(hit_txt_col, hitLblBgTransp)
+                // TP hit  -> label just above the target (top of the box)
+                // SL hit  -> label just below the stop-loss (bottom of the box)
+                // Expired -> label on top of the box
+                hit_y     = hit_sl ? array.get(rr_sls, i) : array.get(rr_tps, i)
+                hit_style = hit_sl ? label.style_label_up : label.style_label_down
+                label.new(array.get(rr_starts, i), hit_y, hit_txt, xloc=xloc.bar_index, yloc=yloc.price, style=hit_style, color=hit_bg_col, textcolor=hit_txt_col, size=size.tiny)
+            array.remove(rr_tp_boxes, i)
+            array.remove(rr_sl_boxes, i)
+            array.remove(rr_lines, i)
+            array.remove(rr_tps, i)
+            array.remove(rr_sls, i)
+            array.remove(rr_entries, i)
+            array.remove(rr_starts, i)
+
+// 2) Open a new position on a BB buy signal or a green H / H+ candle (one box if both fire on the same candle).
+//    Creation stays on confirmed bars so entry (high) / SL (low) are final and no duplicate boxes are made.
+if barstate.isconfirmed and ((showRR and green_open_below_lower) or (showRRH and green_cross_hull))
+    rr_entry  = high
+    rr_sl     = low
+    rr_target = rr_entry + (rr_entry - rr_sl) * rrRatio
+    rr_right  = bar_index + 1
+    array.push(rr_tp_boxes, box.new(bar_index, rr_target, rr_right, rr_entry, border_color=color.new(color.teal, boxBorderTransp), bgcolor=color.new(color.teal, tpFillTransp)))
+    array.push(rr_sl_boxes, box.new(bar_index, rr_entry, rr_right, rr_sl, border_color=color.new(color.red, boxBorderTransp), bgcolor=color.new(color.red, slFillTransp)))
+    array.push(rr_lines, line.new(bar_index, rr_entry, rr_right, rr_entry, color=color.gray, width=1))
+    array.push(rr_tps, rr_target)
+    array.push(rr_sls, rr_sl)
+    array.push(rr_entries, rr_entry)
+    array.push(rr_starts, bar_index)
+
+// ─── Short position box (entry = low, SL = high, target 1:2 below) ───
+// Opens on: (a) a red H / H+ candle, or (b) a red candle that OPENED ABOVE the upper Bollinger Band.
+// Same behaviour as the long box: grows every tick, retired on the confirmed candle where target or stop is hit.
+showRRS = input.bool(false, "Show short position box on red H / H+ signal", group="Position boxes")
+showRRB = input.bool(false, "Show short position box on red candle opened above upper BB", group="Position boxes")
+
+var array<box>   ss_tp_boxes = array.new<box>()
+var array<box>   ss_sl_boxes = array.new<box>()
+var array<line>  ss_lines    = array.new<line>()
+var array<float> ss_tps      = array.new<float>()
+var array<float> ss_sls      = array.new<float>()
+var array<float> ss_entries  = array.new<float>()
+var array<int>   ss_starts   = array.new<int>()
+
+if array.size(ss_tps) > 0
+    for i = array.size(ss_tps) - 1 to 0
+        s_hit_sl = high >= array.get(ss_sls, i)
+        s_hit_tp = low <= array.get(ss_tps, i)
+        s_aged   = bar_index - array.get(ss_starts, i) >= rrMaxBars
+        box.set_right(array.get(ss_tp_boxes, i), bar_index)
+        box.set_right(array.get(ss_sl_boxes, i), bar_index)
+        line.set_x2(array.get(ss_lines, i), bar_index)
+        if barstate.isconfirmed and (s_hit_sl or s_hit_tp or s_aged)
+            if showHitLabels
+                // Points = distance from entry to the level that was hit (short: SL above entry, TP below)
+                s_sl_pts  = array.get(ss_sls, i) - array.get(ss_entries, i)
+                s_tp_pts  = array.get(ss_entries, i) - array.get(ss_tps, i)
+                s_exp_pts = array.get(ss_entries, i) - close
+                s_txt = s_hit_sl ? "SL: " + str.tostring(s_sl_pts, "#.##") : s_hit_tp ? "TP: " + str.tostring(s_tp_pts, "#.##") : "Exp: " + str.tostring(s_exp_pts, "#.##")
+                s_txt_col = s_hit_sl ? color.red : s_hit_tp ? color.teal : color.gray
+                s_bg_col  = color.new(s_txt_col, hitLblBgTransp)
+                // TP hit  -> label just below the target (bottom of the box)
+                // SL hit  -> label just above the stop-loss (top of the box)
+                // Expired -> label on top of the box
+                s_hit_tp_only = s_hit_tp and not s_hit_sl
+                s_y     = s_hit_tp_only ? array.get(ss_tps, i) : array.get(ss_sls, i)
+                s_style = s_hit_tp_only ? label.style_label_up : label.style_label_down
+                label.new(array.get(ss_starts, i), s_y, s_txt, xloc=xloc.bar_index, yloc=yloc.price, style=s_style, color=s_bg_col, textcolor=s_txt_col, size=size.tiny)
+            array.remove(ss_tp_boxes, i)
+            array.remove(ss_sl_boxes, i)
+            array.remove(ss_lines, i)
+            array.remove(ss_tps, i)
+            array.remove(ss_sls, i)
+            array.remove(ss_entries, i)
+            array.remove(ss_starts, i)
+
+// One box per candle, even if both short triggers fire on the same candle.
+if barstate.isconfirmed and ((showRRS and red_cross_hull) or (showRRB and red_open_above_upper))
+    ss_entry  = low
+    ss_sl     = high
+    ss_target = ss_entry - (ss_sl - ss_entry) * rrRatio
+    ss_right  = bar_index + 1
+    array.push(ss_tp_boxes, box.new(bar_index, ss_entry, ss_right, ss_target, border_color=color.new(color.teal, boxBorderTransp), bgcolor=color.new(color.teal, tpFillTransp)))
+    array.push(ss_sl_boxes, box.new(bar_index, ss_sl, ss_right, ss_entry, border_color=color.new(color.red, boxBorderTransp), bgcolor=color.new(color.red, slFillTransp)))
+    array.push(ss_lines, line.new(bar_index, ss_entry, ss_right, ss_entry, color=color.gray, width=1))
+    array.push(ss_tps, ss_target)
+    array.push(ss_sls, ss_sl)
+    array.push(ss_entries, ss_entry)
+    array.push(ss_starts, bar_index)
+
+// ─── BB band-angle warnings for OPEN positions (DISABLED for now - remove the // to re-enable) ───
+// SHORT open  -> warn when the LOWER band starts rising (angle > 0): downside room may be closing.
+// LONG  open  -> warn when the UPPER band starts falling (angle < 0): upside room may be closing.
+// Only positions that started on an EARLIER candle count, and only positions still open after this candle's SL/TP check.
+// showBBWarn    = input.bool(true, "Warn on open positions when the BB angle turns against them", group="Position boxes")
+// warnOnlyFirst = input.bool(true, "Warn only on the candle where the angle flips (off = every candle while it persists)", group="Position boxes")
+//
+// bool short_open = false
+// if array.size(ss_starts) > 0
+//     for i = 0 to array.size(ss_starts) - 1
+//         if array.get(ss_starts, i) < bar_index
+//             short_open := true
+//
+// bool long_open = false
+// if array.size(rr_starts) > 0
+//     for i = 0 to array.size(rr_starts) - 1
+//         if array.get(rr_starts, i) < bar_index
+//             long_open := true
+//
+// lower_rising        = bb_lower_angle > 0
+// lower_rising_first  = lower_rising and not (bb_lower_angle[1] > 0)
+// upper_falling       = bb_upper_angle < 0
+// upper_falling_first = upper_falling and not (bb_upper_angle[1] < 0)
+//
+// short_warn = showBBWarn and short_open and (warnOnlyFirst ? lower_rising_first : lower_rising)
+// long_warn  = showBBWarn and long_open  and (warnOnlyFirst ? upper_falling_first : upper_falling)
+//
+// // Short warning sits on the lower band, long warning sits on the upper band
+// plotshape(short_warn ? lower : na, title="Short: lower BB rising", style=shape.triangleup,   location=location.absolute, color=color.orange, size=size.tiny, text="BB↑", textcolor=color.orange)
+// plotshape(long_warn  ? upper : na, title="Long: upper BB falling", style=shape.triangledown, location=location.absolute, color=color.orange, size=size.tiny, text="BB↓", textcolor=color.orange)
+//
+// alertcondition(short_warn, title="Short: lower BB rising", message="Open SHORT: lower Bollinger Band started rising (angle > 0)")
+// alertcondition(long_warn,  title="Long: upper BB falling", message="Open LONG: upper Bollinger Band started falling (angle < 0)")
+
+// ─── EMA crossover + BB expansion highlight ───────────────────────────
+// 1) A fast/slow EMA crossover happens (bullish = fast crosses above slow, bearish = fast crosses below slow).
+// 2) Within a few candles of that crossover the Bollinger Bands start EXPANDING (upper band rising AND lower band falling).
+// 3) From then on the background is highlighted (green after a bullish cross, red after a bearish cross)
+//    until EITHER band turns the other way (upper band stops rising OR lower band stops falling).
+showHL      = input.bool(true, "Highlight: BB expansion right after an EMA crossover", group="EMA cross + BB expansion")
+hlFastLen   = input.int(9,  "Fast EMA length", minval=1, group="EMA cross + BB expansion")
+hlSlowLen   = input.int(15, "Slow EMA length", minval=2, group="EMA cross + BB expansion")
+hlWindow    = input.int(3,  "BB expansion must begin within this many bars after the crossover", minval=0, maxval=50, group="EMA cross + BB expansion")
+hlTransp    = input.int(85, "Highlight transparency (higher = lighter)", minval=0, maxval=100, group="EMA cross + BB expansion")
+showHLLabel = input.bool(true, "Show a small label where the highlight starts", group="EMA cross + BB expansion")
+
+hl_fast = ta.ema(close, hlFastLen)
+hl_slow = ta.ema(close, hlSlowLen)
+hl_cross_up = ta.crossover(hl_fast, hl_slow)
+hl_cross_dn = ta.crossunder(hl_fast, hl_slow)
+
+// Remember the most recent crossover (bar + direction) and whether it already produced a highlight
+var int  hl_cross_bar = na
+var int  hl_cross_dir = 0
+var bool hl_used      = false
+if hl_cross_up
+    hl_cross_bar := bar_index
+    hl_cross_dir := 1
+    hl_used      := false
+if hl_cross_dn
+    hl_cross_bar := bar_index
+    hl_cross_dir := -1
+    hl_used      := false
+
+// Highlight state: 1 = up phase, -1 = down phase, 0 = off
+var int hl_dir = 0
+hl_recent_cross = not na(hl_cross_bar) and (bar_index - hl_cross_bar) <= hlWindow
+hl_start = hl_dir == 0 and not hl_used and bb_bands_opening and hl_recent_cross
+
+if hl_start
+    hl_dir  := hl_cross_dir
+    hl_used := true
+else if hl_dir != 0 and not bb_bands_opening
+    // A band turned the other way (upper no longer rising or lower no longer falling) -> phase over
+    hl_dir := 0
+
+bgcolor(showHL and hl_dir == 1 ? color.new(color.green, hlTransp) : showHL and hl_dir == -1 ? color.new(color.red, hlTransp) : na, title="EMA cross + BB expansion")
+
+if showHL and showHLLabel and hl_start
+    if hl_cross_dir == 1
+        label.new(bar_index, low - atr, "▲ EMA✕ + BB↔", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(color.green, 70), textcolor=color.green, size=size.tiny, tooltip="Bullish EMA " + str.tostring(hlFastLen) + "/" + str.tostring(hlSlowLen) + " crossover followed by BB expansion. Up phase lasts until a band turns the other way.")
+    else
+        label.new(bar_index, high + atr, "▼ EMA✕ + BB↔", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(color.red, 70), textcolor=color.red, size=size.tiny, tooltip="Bearish EMA " + str.tostring(hlFastLen) + "/" + str.tostring(hlSlowLen) + " crossover followed by BB expansion. Down phase lasts until a band turns the other way.")
+
+hl_end = hl_dir[1] != 0 and hl_dir == 0
+alertcondition(hl_start and hl_cross_dir == 1,  title="EMA cross + BB expansion (UP)",   message="Bullish EMA crossover followed by BB expansion: up phase started")
+alertcondition(hl_start and hl_cross_dir == -1, title="EMA cross + BB expansion (DOWN)", message="Bearish EMA crossover followed by BB expansion: down phase started")
+alertcondition(hl_end, title="EMA cross + BB expansion ended", message="BB expansion phase ended: a Bollinger Band turned the other way")
