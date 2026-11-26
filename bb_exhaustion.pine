@@ -328,38 +328,10 @@ prev_red_below_lower     = (close[1] < open[1]) and (close[1] < lower[1])
 green_after_red_bb       = is_green and prev_red_below_lower
 green_after_red_bb_vol   = green_after_red_bb and vol_ok
 
-// ─── 5-min Lower BB touch check ──────────────────────────────────
-f_lower5() =>
-    ta.sma(close, lengthBB) - mult * ta.stdev(close, lengthBB)
-f_lower5_prev() =>
-    lb = ta.sma(close, lengthBB) - mult * ta.stdev(close, lengthBB)
-    lb[1]
-chartSec = timeframe.in_seconds()
-ltfTf = chartSec >= 300 ? "5" : timeframe.period
-[ltfLows, ltfLowers] = request.security_lower_tf(syminfo.tickerid, ltfTf, [low, f_lower5()])
-bool touch5_ltf = false
-if array.size(ltfLows) > 0
-    for i = 0 to array.size(ltfLows) - 1
-        lb = array.get(ltfLowers, i)
-        if not na(lb) and array.get(ltfLows, i) <= lb
-            touch5_ltf := true
-
-prev5Lower = request.security(syminfo.tickerid, "5", f_lower5_prev(), lookahead=barmerge.lookahead_on)
-touch5_htf = not na(prev5Lower) and low <= prev5Lower
-touch5 = chartSec >= 300 ? touch5_ltf : touch5_htf
-
-gar5      = green_after_red_bb and touch5
-gar5_vol  = gar5 and vol_ok
-garN      = green_after_red_bb and not touch5
-garN_vol  = garN and vol_ok
-plotshape(garN_vol,              title="Red BB→Green+V",         style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 20), size=size.small, text="")
-plotshape(garN and not garN_vol, title="Red BB→Green",           style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 40), size=size.small, text="")
-plotshape(gar5_vol,              title="Red BB→Green+V (5m BB)", style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 0),    size=size.small, text="5m+", textcolor=color.lime)
-plotshape(gar5 and not gar5_vol, title="Red BB→Green (5m BB)",   style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 10), size=size.small, text="5m",  textcolor=color.green)
-alertcondition(garN_vol,              title="Potential Buy",             message="Potential Buy at {{high}}. SL at {{low}}")
-alertcondition(garN and not garN_vol, title="Potential Buy",             message="Potential Buy at {{high}}. SL at {{low}}")
-alertcondition(gar5_vol,              title="Potential Buy + 5m BB (V)", message="Potential Buy (5m lower BB touch, high vol) at {{high}}. SL at {{low}}")
-alertcondition(gar5 and not gar5_vol, title="Potential Buy + 5m BB",     message="Potential Buy (5m lower BB touch) at {{high}}. SL at {{low}}")
+plotshape(green_after_red_bb_vol,                            title="Red BB→Green+V", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 20), size=size.small, text="")
+plotshape(green_after_red_bb and not green_after_red_bb_vol, title="Red BB→Green",   style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 40), size=size.small, text="")
+alertcondition(green_after_red_bb_vol,                            title="Potential Buy", message="Potential Buy at {{high}}. SL at {{low}}")
+alertcondition(green_after_red_bb and not green_after_red_bb_vol, title="Potential Buy", message="Potential Buy at {{high}}. SL at {{low}}")
 
 // ─── EMA9 vs EMA15 Status Dot ─────────────────────────────────────
 var table dotTable = table.new(position.top_right, 1, 1, border_width=0)
